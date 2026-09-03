@@ -529,6 +529,32 @@ entra*; quem vê *o quê* é configurado aqui dentro.
 Com `SIGNUPS_ALLOWED=false`, ninguém entra sem convite — mesmo autenticando no
 Entra com sucesso.
 
+### Onboarding enquanto não há SMTP
+
+Sem servidor de e-mail, o Vaultwarden **aceita os convites de organização
+automaticamente**: o convidado não recebe nem precisa clicar em link, vai direto
+para "aguardando confirmação".
+
+Mas a ordem importa. Como `SSO_SIGNUPS_MATCH_EMAIL=false` está ativo — exigência
+de usar `SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION=true` com o Entra —, um login SSO
+**não** se associa a uma conta pré-existente com o mesmo e-mail. Criar o usuário
+antes e deixá-lo logar depois não funciona.
+
+A sequência que funciona, com `VW_SIGNUPS_ALLOWED=true`:
+
+1. A pessoa acessa o cofre e entra com SSO. A conta é criada nesse momento, sem
+   e-mail nenhum.
+2. Em *Members → Invite*, convide o mesmo e-mail. Sem SMTP, entra já aceito.
+3. Confirme o membro e coloque no grupo do departamento.
+4. Ela recarrega e passa a ver as coleções.
+
+Durante essa janela, só entra quem estiver na whitelist de domínios **e**
+atribuído à aplicação no Entra — que é onde deve ficar o controle real de quem
+tem cofre. Terminado o onboarding, volte `VW_SIGNUPS_ALLOWED` para `false`.
+
+Se algum cadastro falhar reclamando de verificação de e-mail, use
+`VW_SIGNUPS_VERIFY=false` enquanto o SMTP não existir.
+
 Papéis: mantenha **Owner** com uma ou duas pessoas e **Admin** com quem gerencia
 membros. Lembre que esses dois papéis **não** se inscrevem no Key Connector e
 seguem com senha mestra; **User** e **Manager** é que ganham o login sem senha.

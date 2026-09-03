@@ -105,7 +105,10 @@ services:
       # ligado, só passa quem estiver na whitelist de domínio E atribuído à
       # aplicação no Entra. Volte para false assim que criar sua conta.
       - SIGNUPS_ALLOWED=${VW_SIGNUPS_ALLOWED:-false}
-      - SIGNUPS_VERIFY=true
+      # Exige verificacao de e-mail no cadastro local. Com SSO_ONLY=true nao
+      # deveria ser exercido, mas se o cadastro falhar reclamando de
+      # verificacao enquanto nao houver SMTP, ponha false temporariamente.
+      - SIGNUPS_VERIFY=${VW_SIGNUPS_VERIFY:-true}
       - SIGNUPS_DOMAINS_WHITELIST=${VW_SIGNUPS_DOMAINS_WHITELIST:?defina VW_SIGNUPS_DOMAINS_WHITELIST}
       - INVITATIONS_ALLOWED=true
       - INVITATION_ORG_NAME=${VW_INVITATION_ORG_NAME:-Example Corp}

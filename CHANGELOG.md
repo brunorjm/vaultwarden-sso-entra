@@ -6,6 +6,31 @@ jeito que está — principalmente as partes que fogem do óbvio.
 
 ---
 
+## 8 — Correção do healthcheck do Vaultwarden
+
+Primeiro deploy falhou com `dependency failed to start: container vaultwarden is
+unhealthy`. O servidor estava de pé; a sonda é que estava errada.
+
+O healthcheck usava `wget -qO- http://127.0.0.1:8080/alive`, herdado de quando o
+stack apontava para `vaultwarden/server:1.37.2-alpine`. A **imagem do fork é
+Debian 13**, não Alpine, e Debian não traz `wget` — só `curl`. O comando falhava
+por binário inexistente, o container era marcado unhealthy, e o `key-connector`
+não subia por depender de `service_healthy`.
+
+Passou a usar o `/healthcheck.sh` que a própria imagem traz, que é mais correto
+que a sonda manual: lê `ROCKET_PORT`, troca `0.0.0.0` por `localhost`, deriva o
+base path a partir do `DOMAIN` e usa `curl`.
+
+Segunda vez que uma suposição sobre a imagem vira bug — a primeira foi o GID
+(item 6). Ambas teriam sido evitadas inspecionando a imagem em vez de deduzir do
+Dockerfile ou da tag de origem:
+
+```bash
+docker run --rm --entrypoint sh <imagem> -c 'cat /etc/os-release; command -v curl wget'
+```
+
+---
+
 ## 7 — Sanitização e pacote público no registry
 
 **Documentação sanitizada.** Todos os domínios, e-mails, IPs, nomes de

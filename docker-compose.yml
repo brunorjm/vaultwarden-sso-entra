@@ -178,10 +178,13 @@ services:
       - EXTENDED_LOGGING=true
       - LOG_TIMESTAMP_FORMAT=%Y-%m-%dT%H:%M:%S%.3f%:z
 
+    # Usa o healthcheck que a propria imagem traz. Ele le ROCKET_PORT,
+    # trata 0.0.0.0 como localhost e deriva o base path do DOMAIN.
+    # Nao use wget aqui: a imagem e Debian e nao traz wget, so curl.
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/alive"]
+      test: ["CMD", "/healthcheck.sh"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
       start_period: 40s
 

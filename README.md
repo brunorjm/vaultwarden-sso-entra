@@ -628,7 +628,8 @@ O SSO com Entra ID continua funcionando normalmente no upstream — o que se per
 | Todo login recusado logo após o SSO | `SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION` desligado |
 | `AADSTS7000215: Invalid client secret` | Foi copiado o *Secret ID* em vez do *Value*, ou expirou |
 | Cliente não oferece o Key Connector | `KEY_CONNECTOR_ORG_NAME` diferente do nome real da organização; ou o usuário é Owner/Admin, que não podem se inscrever |
-| KC responde 401 em `/user-keys` | KC não conseguiu buscar o JWKS em `KC_IDENTITY_AUTHORITY`. Veja o item de hairpin abaixo |
+| Login parece funcionar mas volta pro início logo depois, sem erro nos logs do Vaultwarden | KC não conseguiu buscar o JWKS. Veja o item de hairpin abaixo — é a causa mais provável quando o Vaultwarden só mostra `200 OK` em tudo |
+| KC responde 401 em `/user-keys` | Mesma causa do item acima |
 | 404 em `/keyconnector/user-keys` | Falta a barra final no `proxy_pass` do NPMplus — o prefixo não está sendo removido |
 | Requisição vai para `//user-keys` | `VW_KEY_CONNECTOR_URL` terminou com barra |
 | KC não sobe, erro de permissão em `/data` | Diretório do host não é do UID 10001 |
@@ -637,17 +638,23 @@ O SSO com Entra ID continua funcionando normalmente no upstream — o que se per
 | Cofre não sincroniza entre dispositivos | Websockets desligado no proxy host do `vault.example.com` |
 | Convites não chegam | SMTP AUTH bloqueado no Microsoft 365 |
 
-**Hairpin.** O Key Connector chama `https://vault.example.com/identity` — sai do
-container, vai até o IP público da própria VPS e volta pelo NPMplus. Se a VPS
-não fizer hairpin NAT, isso falha. Solução, no serviço `key-connector`:
+**Hairpin.** O Key Connector chama `KC_IDENTITY_AUTHORITY`, que é o próprio
+domínio público (`https://<dominio>/identity`) — sairia do container, iria até
+o IP público da VPS e voltaria pelo NPMplus. Muitos provedores não suportam essa
+volta ("hairpin NAT"), e a busca do JWKS falha de um jeito que não aparece nos
+logs do Vaultwarden: o login autentica normal, mas o navegador não consegue
+completar a inscrição no Key Connector e volta para o início sem erro visível.
 
-```yaml
-    extra_hosts:
-      - "vault.example.com:host-gateway"
-```
+O compose já vem com a correção — `extra_hosts: ["${VW_DOMAIN_HOST}:host-gateway"]`
+no serviço `key-connector` — que resolve o domínio para o próprio host dentro do
+container, sem sair da VPS. Depende de `VW_DOMAIN_HOST` estar preenchido com
+**apenas o hostname**, sem `https://` nem barra — confira se não ficou esquecido
+no `.env`, é fácil passar batido porque o compose não consegue derivá-lo
+sozinho a partir de `VW_DOMAIN`.
 
-A alternativa é abandonar o discovery e fixar a chave pública, exportando-a do
-Vaultwarden:
+Se mesmo assim o problema persistir — provedor com rede exótica onde nem
+`host-gateway` resolve — a alternativa é abandonar o discovery e fixar a chave
+pública, exportando-a do Vaultwarden:
 
 ```bash
 openssl rsa -in /opt/vaultwarden/data/rsa_key.pem -pubout -out /opt/vaultwarden/keyconnector/identity.pub.pem

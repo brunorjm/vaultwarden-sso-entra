@@ -6,6 +6,43 @@ jeito que está — principalmente as partes que fogem do óbvio.
 
 ---
 
+## 10 — extra_hosts por padrão no Key Connector (hairpin NAT)
+
+Um login via SSO passou a "funcionar e voltar pro início" de forma silenciosa:
+os logs do Vaultwarden mostravam `200 OK` em toda a sequência — login, sync,
+`get_confirmation_details` — sem nenhum erro. O navegador simplesmente parava de
+progredir depois do último `200` e, minutos depois, reiniciava o fluxo do zero.
+
+Diagnóstico: nada daquilo passava pelo Vaultwarden. O próximo passo do fluxo é o
+**navegador** chamar o Key Connector diretamente
+(`KEY_CONNECTOR_URL + "/user-keys"`), e essa chamada não aparece no log do
+Vaultwarden. Causa raiz: `KC_IDENTITY_AUTHORITY` aponta para o próprio domínio
+público — o Key Connector busca o JWKS ali para validar tokens, o que exige o
+container sair para o IP público da VPS e voltar por hairpin NAT. Provedor sem
+suporte a isso = busca do JWKS falha = toda validação de token falha = a
+inscrição no Key Connector nunca completa, sem gerar log de erro em lugar nenhum
+que o operador olharia primeiro.
+
+Esse cenário já estava previsto no troubleshooting desde o item 3
+(caminho único), mas como algo que o operador aplicaria manualmente se
+precisasse. Passou a vir **por padrão** no serviço `key-connector`:
+
+```yaml
+extra_hosts:
+  - "${VW_DOMAIN_HOST}:host-gateway"
+```
+
+Exigiu uma variável nova, `VW_DOMAIN_HOST` — só o hostname, sem `https://` e sem
+barra. O compose não consegue derivar isso de `VW_DOMAIN` sozinho (não há
+manipulação de string em interpolação de variável do Compose), então os dois
+precisam ser mantidos em sincronia manualmente. Marcada `[OBRIGATÓRIA]` no
+`.env.example`.
+
+Se o provedor já suporta hairpin NAT nativamente, esta entrada é inofensiva —
+só evita uma viagem de rede desnecessária a cada busca de JWKS.
+
+---
+
 ## 9 — Build sem atestação e fixação por digest
 
 Um redeploy falhou puxando a imagem do Key Connector:

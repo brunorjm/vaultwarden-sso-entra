@@ -345,9 +345,27 @@ conta existente. As duas andam juntas — não mexa em uma sem a outra.
 docker run --rm -it ghcr.io/acul021/vaultwarden:testing /vaultwarden hash
 ```
 
-Cole **o hash** em `VW_ADMIN_TOKEN` e guarde a senha num cofre à parte. Em
-arquivo `.env`, troque cada `$` do hash por `$$`; quando o Dockhand injeta como
-variável de ambiente real, não escape.
+Cole **o hash** em `VW_ADMIN_TOKEN` e guarde a senha num cofre à parte.
+
+**Escape cada `$` do hash como `$$`.** O Dockhand grava um arquivo `.env`, e o
+Docker Compose interpola `$` nele — sem escapar, `$argon2id`, `$v` e `$m` viram
+variáveis inexistentes e o hash chega mutilado no container. O sintoma é o
+Compose avisando na saída do deploy:
+
+```
+WARN The "argon2id" variable is not set. Defaulting to a blank string.
+WARN The "v" variable is not set. Defaulting to a blank string.
+```
+
+Se esses warnings aparecerem, o token está sendo destruído. Confirme o que
+chegou de fato:
+
+```bash
+docker exec vaultwarden printenv ADMIN_TOKEN | cut -c1-30
+```
+
+Precisa começar com `$argon2id$v=19$m=`, com **um** cifrão. A mesma regra vale
+para qualquer senha que contenha `$` — banco e SMTP inclusive.
 
 Como Owner/Admin não usam Key Connector, esse token é o seu segundo caminho de
 emergência, independente do Entra.
@@ -652,6 +670,7 @@ O SSO com Entra ID continua funcionando normalmente no upstream — o que se per
 | Todo login recusado logo após o SSO | `SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION` desligado |
 | `AADSTS7000215: Invalid client secret` | Foi copiado o *Secret ID* em vez do *Value*, ou expirou |
 | Cliente não oferece o Key Connector | `KEY_CONNECTOR_ORG_NAME` diferente do nome real da organização; ou o usuário é Owner/Admin, que não podem se inscrever |
+| `502` em `/keyconnector/alive`, e o log do KC repete `identity provider not reachable yet` | O KC **só passa a escutar depois** de descobrir o provedor de identidade. Falhando a descoberta, ele nunca abre a porta e o nginx devolve 502. Quase sempre é o `extra_hosts` ausente ou `VW_DOMAIN_HOST` não preenchido |
 | Login e criação funcionam, mas listar itens fica carregando pra sempre — na extensão E no celular, enquanto o web vault funciona. E F5 no web vault pede login de novo, sempre | Sessão não persiste. Falta `offline_access` concedido no App Registration do SSO, exigido por `SSO_AUTH_ONLY_NOT_SESSION=false`. Sem refresh token não há renovação. Veja "Sessão que não persiste" abaixo |
 | Login parece funcionar mas volta pro início logo depois, sem erro nos logs do Vaultwarden | KC não conseguiu buscar o JWKS. Veja o item de hairpin abaixo — é a causa mais provável quando o Vaultwarden só mostra `200 OK` em tudo |
 | KC responde 401 em `/user-keys` | Mesma causa do item acima |

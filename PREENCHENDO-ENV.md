@@ -116,9 +116,10 @@ para entrar em `/admin`) e cole **o hash** na variável.
 VW_ADMIN_TOKEN=$$argon2id$$v=19$$m=65540,t=3,p=4$$c29tZXNhbHQ$$hash...
 ```
 
-Se o Dockhand injetar como variável de ambiente real, **não** escape — cole o
-hash original. Errar isso é a causa mais provável de "a senha do /admin não
-funciona".
+Isso vale **também no Dockhand**: ele grava um arquivo `.env`, então a
+interpolação acontece do mesmo jeito. Se o deploy imprimir
+`WARN The "argon2id" variable is not set`, o hash está sendo destruído — e essa
+é a causa mais provável de "a senha do /admin não funciona".
 
 ---
 

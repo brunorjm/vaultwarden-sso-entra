@@ -1,0 +1,5 @@
+.env
+.env.local
+data/
+prompt-devs-*.md
+key-connector/

@@ -1,0 +1,273 @@
+# ==============================================================================
+# Vaultwarden + Key Connector — Cofre corporativo Example Corp
+#
+# Login com a conta Microsoft (Entra ID, OIDC) SEM senha mestra, via
+# Key Connector (github.com/acul021/key-connector).
+#
+# Domínio único (NPMplus é o único componente com portas públicas):
+#   https://vault.example.com               -> 127.0.0.1:8222
+#   https://vault.example.com/keyconnector/ -> 127.0.0.1:8281  (location no NPMplus)
+#
+# Variáveis obrigatórias usam a forma ${VAR:?mensagem}: se o Dockhand não
+# entregar alguma, o deploy FALHA com o nome da variável em vez de subir
+# um container silenciosamente mal configurado.
+#
+# ATENÇÃO — leia o README antes de subir:
+#   * Depende do PR #7419, AINDA NAO MERGEADO no Vaultwarden upstream.
+#     Exige a imagem de fork em VW_IMAGE (amd64 apenas).
+#   * Perder o banco do Key Connector OU a KC_ENCRYPTION_KEY torna TODOS
+#     os cofres permanentemente indecifráveis. Não existe recuperação.
+#   * Nunca escalar o vaultwarden além de 1 réplica (migrations no boot).
+# ==============================================================================
+
+services:
+  # ============================================================================
+  # Prepara os diretórios de dados no host com o dono correto.
+  #
+  # Existe porque o Dockhand só transfere o compose e sobe o stack: se os
+  # diretórios não existirem, o Docker os cria como root e os containers,
+  # que rodam como 1000 e 10001, não conseguem escrever. Roda como root,
+  # faz chown e sai.
+  # ============================================================================
+  init-perms:
+    image: busybox:1.37.0
+    container_name: vaultwarden-init-perms
+    restart: "no"
+    volumes:
+      - /opt/vaultwarden/data:/mnt/vaultwarden
+      - /opt/vaultwarden/keyconnector:/mnt/keyconnector
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        chown 1000  /mnt/vaultwarden
+        chown 10001 /mnt/keyconnector
+        chmod 700 /mnt/vaultwarden /mnt/keyconnector
+        echo "[init-perms] diretorios prontos"
+
+  vaultwarden:
+    # Fork com o PR #7419 (Key Connector). Pinar por digest — ver README.
+    # Para voltar ao upstream estável, troque VW_IMAGE e desligue o KC.
+    image: ${VW_IMAGE:?defina VW_IMAGE com o digest da imagem}
+    container_name: vaultwarden
+    restart: unless-stopped
+    depends_on:
+      init-perms:
+        condition: service_completed_successfully
+
+    # Não-root. O init-perms acima garante a posse do diretório.
+    user: "1000:1000"
+
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+
+    # rsa_key.pem (assina os JWT que o Key Connector valida), anexos,
+    # Sends e cache de ícones. Não é descartável.
+    volumes:
+      - /opt/vaultwarden/data:/data:rw
+
+    # Publicação restrita ao localhost — NPMplus termina o TLS.
+    ports:
+      - "127.0.0.1:8222:8080"
+
+    # Todas as variáveis listadas explicitamente: no deploy remoto a
+    # interpolação implícita de .env pode chegar vazia sem erro.
+    environment:
+      # ---------- Servidor ----------
+      - DOMAIN=${VW_DOMAIN:?defina VW_DOMAIN}
+      - ROCKET_ADDRESS=0.0.0.0
+      - ROCKET_PORT=8080
+      - DATA_FOLDER=/data
+      - WEB_VAULT_ENABLED=true
+
+      # ---------- Banco (role e database dedicados, via tailnet) ----------
+      - DATABASE_URL=${VW_DATABASE_URL:?defina VW_DATABASE_URL}
+      - DATABASE_MAX_CONNS=${VW_DATABASE_MAX_CONNS:-10}
+
+      # ---------- Proxy reverso ----------
+      # Sem isto o rate-limit e os logs de login veriam sempre o IP do proxy.
+      - IP_HEADER=X-Real-IP
+
+      # ---------- Cadastro ----------
+      # Padrão false: ninguém entra sem convite. Ligue temporariamente para
+      # criar a PRIMEIRA conta quando o SMTP ainda não estiver pronto — o
+      # login via SSO cria a conta sozinho, sem precisar de e-mail. Mesmo
+      # ligado, só passa quem estiver na whitelist de domínio E atribuído à
+      # aplicação no Entra. Volte para false assim que criar sua conta.
+      - SIGNUPS_ALLOWED=${VW_SIGNUPS_ALLOWED:-false}
+      - SIGNUPS_VERIFY=true
+      - SIGNUPS_DOMAINS_WHITELIST=${VW_SIGNUPS_DOMAINS_WHITELIST:?defina VW_SIGNUPS_DOMAINS_WHITELIST}
+      - INVITATIONS_ALLOWED=true
+      - INVITATION_ORG_NAME=${VW_INVITATION_ORG_NAME:-Example Corp}
+
+      # ---------- Organização / departamentos ----------
+      - ORG_GROUPS_ENABLED=true
+      # Vazio deixaria QUALQUER usuário criar organização — por isso é obrigatória.
+      - ORG_CREATION_USERS=${VW_ORG_CREATION_USERS:?defina VW_ORG_CREATION_USERS}
+      - EMERGENCY_ACCESS_ALLOWED=false
+      - SENDS_ALLOWED=true
+
+      # ---------- SSO — Microsoft Entra ID ----------
+      - SSO_ENABLED=true
+      # Com Key Connector os usuários não têm senha mestra, então o login
+      # local precisa estar fechado. Ver README para a janela de migração.
+      - SSO_ONLY=${VW_SSO_ONLY:?defina VW_SSO_ONLY}
+      - SSO_AUTHORITY=${VW_SSO_AUTHORITY:?defina VW_SSO_AUTHORITY}
+      - SSO_CLIENT_ID=${VW_SSO_CLIENT_ID:?defina VW_SSO_CLIENT_ID}
+      - SSO_CLIENT_SECRET=${VW_SSO_CLIENT_SECRET:?defina VW_SSO_CLIENT_SECRET}
+      - SSO_SCOPES=email profile offline_access
+      - SSO_PKCE=true
+      # Entra ID não emite a claim `email_verified`. Sem isto, todo login
+      # é recusado. Obriga SSO_SIGNUPS_MATCH_EMAIL=false (ver README).
+      - SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION=true
+      - SSO_SIGNUPS_MATCH_EMAIL=false
+      - SSO_AUTH_ONLY_NOT_SESSION=false
+      - SSO_CLIENT_CACHE_EXPIRATION=300
+      # Só se aplica a Owner/Admin, que não podem se inscrever no Key
+      # Connector e continuam com senha mestra.
+      - SSO_MASTER_PASSWORD_POLICY=${VW_SSO_MASTER_PASSWORD_POLICY:-}
+      - SSO_DEBUG_TOKENS=false
+
+      # ---------- Key Connector (PR #7419) ----------
+      # KEY_CONNECTOR_URL é entregue aos CLIENTES (web vault, extensão, app,
+      # desktop, CLI), que montam a chamada por concatenação simples:
+      #     keyConnectorUrl + "/user-keys"
+      # Logo: URL pública, e SEM barra no final. Aqui ela é um caminho no
+      # próprio domínio, servido pelo NPMplus (ver README, passo 8).
+      # O nome da organização precisa bater exatamente com o cadastrado.
+      - KEY_CONNECTOR_ENABLED=${VW_KEY_CONNECTOR_ENABLED:?defina VW_KEY_CONNECTOR_ENABLED}
+      - KEY_CONNECTOR_URL=${VW_KEY_CONNECTOR_URL:?defina VW_KEY_CONNECTOR_URL}
+      - KEY_CONNECTOR_ORG_NAME=${VW_KEY_CONNECTOR_ORG_NAME:?defina VW_KEY_CONNECTOR_ORG_NAME}
+
+      # ---------- Painel /admin ----------
+      # Hash Argon2id, nunca o token em texto puro. Vazio DESABILITA o
+      # painel silenciosamente, por isso é obrigatória.
+      - ADMIN_TOKEN=${VW_ADMIN_TOKEN:?defina VW_ADMIN_TOKEN com o hash Argon2id}
+      - DISABLE_ADMIN_TOKEN=false
+
+      # ---------- SMTP (convites) ----------
+      # Opcionais de propósito: SMTP_HOST vazio simplesmente desliga o envio
+      # de e-mail, e o servidor sobe normalmente. Isso permite implantar e
+      # testar SSO e Key Connector antes do relay estar provisionado.
+      # Diferente de ADMIN_TOKEN e ORG_CREATION_USERS, uma falha aqui não é
+      # silenciosa — aparece no primeiro convite que não chega.
+      - SMTP_HOST=${VW_SMTP_HOST:-}
+      - SMTP_PORT=${VW_SMTP_PORT:-587}
+      - SMTP_SECURITY=${VW_SMTP_SECURITY:-starttls}
+      - SMTP_FROM=${VW_SMTP_FROM:-}
+      - SMTP_FROM_NAME=${VW_SMTP_FROM_NAME:-Cofre Corporativo}
+      - SMTP_USERNAME=${VW_SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${VW_SMTP_PASSWORD:-}
+      - SMTP_TIMEOUT=15
+
+      # ---------- Push mobile (opcional) ----------
+      - PUSH_ENABLED=${VW_PUSH_ENABLED:-false}
+      - PUSH_INSTALLATION_ID=${VW_PUSH_INSTALLATION_ID:-}
+      - PUSH_INSTALLATION_KEY=${VW_PUSH_INSTALLATION_KEY:-}
+
+      # ---------- Ícones e logs ----------
+      - ICON_SERVICE=internal
+      - ICON_CACHE_TTL=2592000
+      - LOG_LEVEL=info
+      - EXTENDED_LOGGING=true
+      - LOG_TIMESTAMP_FORMAT=%Y-%m-%dT%H:%M:%S%.3f%:z
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/alive"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # ============================================================================
+  # Key Connector — guarda a chave de criptografia de cada usuário, cifrada
+  # com AES-256-GCM sob a KC_ENCRYPTION_KEY.
+  #
+  # É o componente mais sensível do stack: quem obtiver o banco E a
+  # KC_ENCRYPTION_KEY, junto de um token OIDC válido, decifra os cofres.
+  # Trate o backup dele com o mesmo rigor do banco do Vaultwarden, e
+  # guarde a chave SEPARADA do backup.
+  #
+  # Publicado em /keyconnector/ no mesmo domínio do Vaultwarden. O NPMplus
+  # remove o prefixo, então o serviço segue servindo /alive e /user-keys
+  # na raiz — ele não sabe que está atrás de um sub-caminho.
+  # ============================================================================
+  key-connector:
+    # Construída a partir de um commit fixo do repositório e publicada no
+    # registry da empresa — ver README, "Construir a imagem do Key Connector".
+    image: ${KC_IMAGE:?defina KC_IMAGE com a imagem publicada no registry}
+    container_name: key-connector
+    restart: unless-stopped
+    depends_on:
+      init-perms:
+        condition: service_completed_successfully
+      vaultwarden:
+        condition: service_healthy
+
+    # Confere com o usuario real da imagem: uid=10001(keyconnector)
+    # gid=999(keyconnector). O Dockerfile fixa so o UID (useradd -r -u 10001);
+    # o GID sai do proximo livre do sistema, por isso 999 e nao 10001.
+    # Verificado com: docker run --rm --entrypoint id <imagem>
+    user: "10001:999"
+
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+
+    # SQLite. O projeto só compila o backend sqlite do sqlx — não há
+    # opção de apontar para o PostgreSQL da VPS de banco.
+    volumes:
+      - /opt/vaultwarden/keyconnector:/data:rw
+
+    ports:
+      - "127.0.0.1:8281:8081"
+
+    environment:
+      - KC_BIND_ADDR=0.0.0.0:8081
+      - KC_DATABASE_URL=sqlite:///data/keyconnector.db?mode=rwc
+      # Busca o JWKS do Vaultwarden para validar os tokens. Sobrevive à
+      # rotação do rsa_key.pem, ao contrário da variante estática.
+      - KC_IDENTITY_AUTHORITY=${KC_IDENTITY_AUTHORITY:?defina KC_IDENTITY_AUTHORITY}
+      # Perder esta chave torna todos os cofres indecifráveis.
+      - KC_ENCRYPTION_KEY=${KC_ENCRYPTION_KEY:?defina KC_ENCRYPTION_KEY}
+      - RUST_LOG=info
+
+    # A imagem é debian-slim, sem curl nem wget. /dev/tcp é builtin do bash.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8081; printf 'GET /alive HTTP/1.0\r\n\r\n' >&3; head -n1 <&3 | grep -q 200"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    deploy:
+      resources:
+        limits:
+          memory: 256m

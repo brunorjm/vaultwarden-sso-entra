@@ -134,7 +134,15 @@ services:
       # é recusado. Obriga SSO_SIGNUPS_MATCH_EMAIL=false (ver README).
       - SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION=true
       - SSO_SIGNUPS_MATCH_EMAIL=false
-      - SSO_AUTH_ONLY_NOT_SESSION=false
+      # false = a sessao do Vaultwarden segue o ciclo de vida dos tokens do
+      # Entra: revogou la, cai aqui. Mas EXIGE refresh token funcionando, o
+      # que depende do escopo offline_access concedido no App Registration.
+      # Sem ele, nenhuma sessao persiste - F5 no web vault pede login de
+      # novo, e extensao/celular nao conseguem sincronizar (login e criacao
+      # funcionam, listagem nao). Se for o caso, ponha true: o Vaultwarden
+      # passa a gerenciar a sessao sozinho, ao custo de perder a revogacao
+      # imediata pelo Entra.
+      - SSO_AUTH_ONLY_NOT_SESSION=${VW_SSO_AUTH_ONLY_NOT_SESSION:-false}
       - SSO_CLIENT_CACHE_EXPIRATION=300
       # Só se aplica a Owner/Admin, que não podem se inscrever no Key
       # Connector e continuam com senha mestra.

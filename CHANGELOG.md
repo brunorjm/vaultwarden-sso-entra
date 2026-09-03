@@ -6,6 +6,47 @@ jeito que está — principalmente as partes que fogem do óbvio.
 
 ---
 
+## 12 — Sessao que nao persiste: offline_access e SSO_AUTH_ONLY_NOT_SESSION
+
+Depois de resolver o bloco do NPMplus, apareceu um conjunto de sintomas que
+parecia bug de exibicao e nao era:
+
+- login e criacao de item funcionam
+- **listar** itens fica carregando pra sempre, na extensao **e** no celular
+- o web vault lista normalmente, mas **F5 pede login de novo, sempre**
+- logs do Vaultwarden: `200 OK` em tudo
+
+Duas hipoteses foram descartadas antes da certa. Versao desatualizada da
+extensao: era 2026.8.0, exatamente a exigida, e o mesmo comportamento aparecia
+em Edge e Chrome. Cloudflare desafiando as requisicoes da extensao (os IPs de
+cliente nos logs eram todos `172.64.0.0/13`, faixa da Cloudflare): contornar via
+`hosts` apontando direto para o IP da VPS nao mudou nada.
+
+A pista decisiva foi o F5. O problema nao era exibicao, era **sessao nao
+renovando**. Criar funciona porque acontece logo apos o login, com token ainda
+valido; listar depende de sincronizacao, que precisa renovar o token.
+
+`SSO_AUTH_ONLY_NOT_SESSION=false` — escolhido deliberadamente para que revogar
+no Entra derrubasse o acesso aqui — amarra a sessao ao ciclo de vida dos tokens
+do IdP, e portanto **exige refresh token**. Refresh token exige `offline_access`
+concedido em *API permissions* do App Registration do SSO, com admin consent.
+Isso nunca foi confirmado durante o setup: a tela de permissoes revisada na
+epoca era a do app de e-mail, nao a do SSO.
+
+Mudancas:
+
+- `SSO_AUTH_ONLY_NOT_SESSION` virou `VW_SSO_AUTH_ONLY_NOT_SESSION` (default
+  `false`), para permitir desacoplar a sessao do IdP sem editar o compose. O
+  custo de `true` esta documentado: perde-se a revogacao imediata pelo Entra.
+- README ganhou a secao "Sessao que nao persiste" com o conjunto completo de
+  sintomas, porque a combinacao e dificil de interpretar isoladamente — cada
+  sintoma sozinho aponta para o lugar errado.
+- Registrado tambem que preencher apenas a **URL do servidor** no app de celular
+  e o correto (ele deriva API, identidade, cofre web e icones), para nao virar
+  falso suspeito numa proxima investigacao.
+
+---
+
 ## 11 — Causa raiz do loop: bloco Advanced do NPMplus ausente
 
 O `extra_hosts` do item 10 não resolveu o loop. Os logs do `key-connector`

@@ -652,6 +652,7 @@ O SSO com Entra ID continua funcionando normalmente no upstream — o que se per
 | Todo login recusado logo após o SSO | `SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION` desligado |
 | `AADSTS7000215: Invalid client secret` | Foi copiado o *Secret ID* em vez do *Value*, ou expirou |
 | Cliente não oferece o Key Connector | `KEY_CONNECTOR_ORG_NAME` diferente do nome real da organização; ou o usuário é Owner/Admin, que não podem se inscrever |
+| Login e criação funcionam, mas listar itens fica carregando pra sempre — na extensão E no celular, enquanto o web vault funciona. E F5 no web vault pede login de novo, sempre | Sessão não persiste. Falta `offline_access` concedido no App Registration do SSO, exigido por `SSO_AUTH_ONLY_NOT_SESSION=false`. Sem refresh token não há renovação. Veja "Sessão que não persiste" abaixo |
 | Login parece funcionar mas volta pro início logo depois, sem erro nos logs do Vaultwarden | KC não conseguiu buscar o JWKS. Veja o item de hairpin abaixo — é a causa mais provável quando o Vaultwarden só mostra `200 OK` em tudo |
 | KC responde 401 em `/user-keys` | Mesma causa do item acima |
 | 404 em `/keyconnector/user-keys` | Falta a barra final no `proxy_pass` do NPMplus — o prefixo não está sendo removido |
@@ -661,6 +662,33 @@ O SSO com Entra ID continua funcionando normalmente no upstream — o que se per
 | `exec format error` no vaultwarden | VPS arm64 — a imagem de fork é só amd64 |
 | Cofre não sincroniza entre dispositivos | Websockets desligado no proxy host do `vault.example.com` |
 | Convites não chegam | SMTP AUTH bloqueado no Microsoft 365 |
+
+**Sessão que não persiste.** O conjunto de sintomas é confuso porque parece bug
+de exibição, mas não é:
+
+- login funciona, criar item funciona
+- **listar** itens fica carregando indefinidamente na extensão e no celular
+- o web vault lista normalmente, **mas F5 pede login de novo, sempre**
+- os logs do Vaultwarden mostram `200 OK` em tudo
+
+A leitura correta: a sessão não está sendo renovada. Criar funciona porque
+acontece logo após o login, com o token ainda válido; listar depende de
+sincronização, que precisa renovar.
+
+`SSO_AUTH_ONLY_NOT_SESSION=false` amarra a sessão do Vaultwarden ao ciclo de
+vida dos tokens do Entra — o que exige **refresh token**, que só existe se
+`offline_access` estiver concedido em *API permissions* do App Registration do
+SSO, com *Grant admin consent* aplicado.
+
+Confira lá primeiro. Se preferir desacoplar, `VW_SSO_AUTH_ONLY_NOT_SESSION=true`
+faz o Vaultwarden gerenciar a sessão sozinho — resolve o sintoma, mas você perde
+a revogação imediata pelo Entra: desativar alguém lá deixa de derrubar a sessão
+que já está aberta aqui.
+
+Um detalhe que atrapalha o diagnóstico: no app de celular, preencher apenas a
+**URL do servidor** é o correto — ele deriva as demais (API, identidade, cofre
+web, ícones). Os campos separados existem para topologias fora do padrão, e
+deixá-los vazios não é a causa deste problema.
 
 **Hairpin.** O Key Connector chama `KC_IDENTITY_AUTHORITY`, que é o próprio
 domínio público (`https://<dominio>/identity`) — sairia do container, iria até

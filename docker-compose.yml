@@ -31,6 +31,7 @@ services:
   # ============================================================================
   init-perms:
     image: busybox:1.37.0
+    pull_policy: missing
     container_name: vaultwarden-init-perms
     restart: "no"
     volumes:
@@ -50,6 +51,9 @@ services:
     # Fork com o PR #7419 (Key Connector). Pinar por digest — ver README.
     # Para voltar ao upstream estável, troque VW_IMAGE e desligue o KC.
     image: ${VW_IMAGE:?defina VW_IMAGE com o digest da imagem}
+    # Imagem fixada por digest: se ja existe local, o digest garante que e
+    # a mesma. Evita ida ao registry a cada deploy. Trocou o digest, puxa.
+    pull_policy: missing
     container_name: vaultwarden
     restart: unless-stopped
     depends_on:
@@ -216,6 +220,7 @@ services:
     # Construída a partir de um commit fixo do repositório e publicada no
     # registry da empresa — ver README, "Construir a imagem do Key Connector".
     image: ${KC_IMAGE:?defina KC_IMAGE com a imagem publicada no registry}
+    pull_policy: missing
     container_name: key-connector
     restart: unless-stopped
     depends_on:

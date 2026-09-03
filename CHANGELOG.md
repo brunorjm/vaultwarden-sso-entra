@@ -6,6 +6,39 @@ jeito que está — principalmente as partes que fogem do óbvio.
 
 ---
 
+## 11 — Causa raiz do loop: bloco Advanced do NPMplus ausente
+
+O `extra_hosts` do item 10 não resolveu o loop. Os logs do `key-connector`
+mostravam a busca do JWKS funcionando (`discovered identity provider ...
+jwks_uri=...`) — então hairpin NAT não era a causa desta vez, embora a correção
+continue válida para quando for.
+
+Diagnóstico decisivo veio de comparar as duas pontas:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8281/alive        # 200
+curl -sS -o /dev/null -w '%{http_code}\n' https://<dominio>/keyconnector/alive  # 404
+```
+
+KC saudável localmente, rota pública ausente: o bloco `location /keyconnector/`
+do passo 8 nunca tinha sido colado no NPMplus. Ele mora na aba **Advanced**,
+separada dos campos principais do proxy host (domínio, scheme, porta) — dá para
+configurar o proxy host inteiro sem notar que essa aba tinha algo pendente.
+
+A primeira tentativa de diagnóstico rodou o `curl` de teste no `cmd.exe` do
+Windows em vez da VPS, o que mascarou o sinal: `/dev/null` não existe ali e as
+aspas simples do `-w` não são removidas como num shell POSIX, produzindo um erro
+de escrita em vez de uma resposta limpa. O código HTTP real (404) apareceu
+mesmo assim, entre aspas literais — dava para ler, mas exigiu explicar por que o
+teste era pouco confiável antes de confiar no número.
+
+README ganhou uma seção "Confirme antes de testar o login" logo após o bloco
+Advanced, com os dois curls lado a lado e a advertência de rodá-los na VPS, não
+no Windows. O objetivo é pegar esse gap em segundos da próxima vez, não depois
+de uma sessão inteira de depuração comparando logs.
+
+---
+
 ## 10 — extra_hosts por padrão no Key Connector (hairpin NAT)
 
 Um login via SSO passou a "funcionar e voltar pro início" de forma silenciosa:

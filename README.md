@@ -466,6 +466,30 @@ Tire uma das duas barras e o caminho chega errado no serviço: sem a de
 Se o WAF do NPMplus barrar o login, a regra costuma cair em
 `/identity/connect/*`. Crie a exceção nesse caminho em vez de desligar o WAF.
 
+### Confirme antes de testar o login
+
+O bloco `/keyconnector/` mora na aba **Advanced**, longe dos campos principais
+do proxy host — é fácil concluir "configurei o proxy host" sem ter aberto essa
+aba. Sintoma se ela ficar de fora: o SSO autentica normalmente, os logs do
+Vaultwarden mostram `200 OK` em tudo, e o navegador volta para o início sem
+erro visível — porque a chamada que falha é do navegador direto para o Key
+Connector, e não passa pelo Vaultwarden.
+
+Antes de tentar logar, confirme os dois lados:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8281/alive
+```
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://vault.example.com/keyconnector/alive
+```
+
+Ambos precisam responder `200`. Primeiro `200` e segundo `404` = bloco Advanced
+ausente ou sem as barras finais. Rode os dois **na VPS** — no Windows, `curl.exe`
+do `cmd.exe` não tem `/dev/null` nem descarta aspas simples como um shell POSIX,
+e o teste sai inconclusivo.
+
 ### Por que um caminho, e não um subdomínio
 
 O Key Connector é um serviço HTTP separado, e **quem chama é o cliente**, não o

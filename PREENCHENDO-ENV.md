@@ -232,20 +232,36 @@ publica só o `Dockerfile`, não uma imagem pronta.
 git clone https://github.com/acul021/key-connector.git && cd key-connector && git rev-parse HEAD
 ```
 
-Anote o commit e construa:
+Anote o commit e construa **sem atestação**:
 
 ```bash
-docker build -t ghcr.io/<seu-usuario>/key-connector:<COMMIT_SHA> . && docker push ghcr.io/<seu-usuario>/key-connector:<COMMIT_SHA>
+docker build --provenance=false --sbom=false -t ghcr.io/<seu-usuario>/key-connector:<COMMIT_SHA> . && docker push ghcr.io/<seu-usuario>/key-connector:<COMMIT_SHA>
+```
+
+As duas flags importam. Sem elas o buildx publica um índice OCI com um manifest
+extra de plataforma `unknown/unknown` — a atestação de proveniência. O Docker da
+VPS tenta buscá-la a cada pull, e um deploy chegou a falhar assim:
+
+```
+failed to do request: Get ".../manifests/sha256-3fd08543...": dial tcp ...: i/o timeout
+```
+
+Proveniência não é validada em lugar nenhum deste fluxo, então é uma requisição
+a mais que só tem como atrapalhar.
+
+Depois do push, fixe por digest — tag é mutável mesmo no seu próprio registry:
+
+```bash
+docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/<seu-usuario>/key-connector:<COMMIT_SHA>
 ```
 
 ```
-KC_IMAGE=ghcr.io/<seu-usuario>/key-connector:a1b2c3d
+KC_IMAGE=ghcr.io/<seu-usuario>/key-connector@sha256:e1dd0306...
 ```
 
-Se a organização `example` não existir no GitHub, use sua própria conta
-(`ghcr.io/<seu-usuario>/key-connector:<sha>`). Nos dois casos, se o pacote ficar
-privado, a VPS precisa de `docker login ghcr.io` antes do deploy — senão o pull
-falha.
+Sobre visibilidade: o pacote nasce privado, e aí a VPS precisa de
+`docker login ghcr.io` antes do deploy. Este stack assume **público** — o
+porquê está no README, seção "Visibilidade do pacote no registry".
 
 ---
 

@@ -6,6 +6,36 @@ jeito que está — principalmente as partes que fogem do óbvio.
 
 ---
 
+## 9 — Build sem atestação e fixação por digest
+
+Um redeploy falhou puxando a imagem do Key Connector:
+
+```
+failed to do request: Get ".../manifests/sha256-3fd08543...": dial tcp 140.82.114.34:443: i/o timeout
+```
+
+O digest procurado não era o da imagem — era o **manifest de atestação** que o
+buildx anexa por padrão, publicado como uma entrada de plataforma
+`unknown/unknown` dentro de um índice OCI. Diferente dos erros anteriores, este
+não era permissão: `busybox` e a imagem do Vaultwarden, essa também no ghcr,
+baixaram no mesmo run.
+
+A imagem passou a ser construída com `--provenance=false --sbom=false`. O
+resultado é um manifest único, sem índice e sem a entrada extra. O digest do
+conteúdo não mudou (`sha256:e1dd0306...` antes e depois) — só sumiu o invólucro,
+o que confirma que o binário é o mesmo.
+
+Proveniência não é validada em nenhum ponto deste fluxo, então era uma
+requisição por pull que só tinha como atrapalhar. Também explica o
+`version_count: 3` que o pacote mostrava para uma tag só.
+
+**`KC_IMAGE` passou a ser fixado por digest**, como o `VW_IMAGE` já era. O
+episódio deixou claro que tag é mutável inclusive no registry da própria
+empresa: republicar `e784bd8` trocou o digest para o qual ela apontava, com o
+mesmo commit de origem.
+
+---
+
 ## 8 — Correção do healthcheck do Vaultwarden
 
 Primeiro deploy falhou com `dependency failed to start: container vaultwarden is

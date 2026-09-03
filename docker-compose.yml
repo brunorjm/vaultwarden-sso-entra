@@ -139,7 +139,9 @@ services:
       # Só se aplica a Owner/Admin, que não podem se inscrever no Key
       # Connector e continuam com senha mestra.
       - SSO_MASTER_PASSWORD_POLICY=${VW_SSO_MASTER_PASSWORD_POLICY:-}
-      - SSO_DEBUG_TOKENS=false
+      # Loga os tokens do SSO. Use para diagnosticar login em loop, e
+      # DESLIGUE em seguida limpando os logs - o token da acesso a conta.
+      - SSO_DEBUG_TOKENS=${VW_SSO_DEBUG_TOKENS:-false}
 
       # ---------- Key Connector (PR #7419) ----------
       # KEY_CONNECTOR_URL é entregue aos CLIENTES (web vault, extensão, app,

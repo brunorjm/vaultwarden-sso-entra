@@ -6,6 +6,68 @@ jeito que está — principalmente as partes que fogem do óbvio.
 
 ---
 
+## 14 — Causa raiz do cliente: fork parado no Vaultwarden 1.36.0
+
+Depois de corrigir config, rota e TLS, um sintoma sobreviveu: web vault
+funcionando e listando itens, extensao e celular autenticando, criando itens,
+mas com a lista carregando pra sempre.
+
+Nao era configuracao. Com acesso a VPS:
+
+```
+Vaultwarden 1.36.0-318e7b94
+Web-Vault 2026.6.2
+```
+
+O upstream publicou dois marcos de compatibilidade depois dessa versao. O
+release notes do 1.37.2 e explicito: *"This update is required for support with
+clients with version 2026.8.0+"*. A correcao e o PR #7608, que adiciona um
+`revisionDate` que os clientes novos esperam para saber se a sincronizacao
+terminou.
+
+A extensao instalada era 2026.8.0 — exatamente a faixa que exige 1.37.2.
+
+Isso explica a assimetria que confundiu o diagnostico por varias rodadas: o web
+vault vem empacotado com o servidor e casa com a versao dele, enquanto extensao
+e celular se atualizam sozinhos pelas lojas e passam a frente. Testar em Edge e
+Chrome nao ajudou porque ambos puxam a mesma versao da loja.
+
+A build do fork de 07/09 foi verificada e continua em 1.36.0 (so o web vault
+empacotado subiu para 2026.7.0), entao atualizar o digest sozinho nao resolve.
+
+README ganhou a secao "Compatibilidade de cliente", com o comando de verificacao
+e as tres saidas: esperar o fork rebasear, construir sobre a 1.37.2, ou abrir
+mao do Key Connector.
+
+E a manifestacao concreta do risco registrado no item 2: depender de PR nao
+mergeado significa ficar atras do upstream, e a defasagem aparece primeiro nos
+clientes que atualizam sozinhos.
+
+### Achado paralelo: config.json sobrescrevendo tudo
+
+O log de inicializacao mostrava:
+
+```
+[WARNING] The following environment variables are being overridden by the config.json file.
+[WARNING] DOMAIN, ... ADMIN_TOKEN, ... SSO_*, KEY_CONNECTOR_*, SMTP_*
+```
+
+Salvar qualquer coisa pelo painel `/admin` grava um `/data/config.json` que
+passa a ter precedencia sobre as variaveis de ambiente — para **todas** as
+chaves, nao so as editadas. Foi o que aconteceu ao configurar SMTP pelo painel.
+
+Consequencia: as correcoes feitas no `.env` depois disso nao surtiram efeito
+nenhum, e o compose virou decorativo para essas chaves. O `.env` mostrava
+`DOMAIN=vault.example.com` (sem esquema) enquanto o config.json tinha
+`https://vault.example.com` — o valor correto vinha do arquivo, nao do ambiente.
+
+Isso colide com a regra de configuracao so por variavel de ambiente. A saida
+exige ordem: corrigir as variaveis no Dockhand **primeiro**, so entao apagar o
+config.json — o contrario derruba o stack, porque hoje e o config.json que
+guarda a configuracao boa.
+
+---
+
 ## 13 — Reversao do extra_hosts: ele quebrava o TLS do Key Connector
 
 O `extra_hosts` adicionado no item 10 **causou** uma falha em vez de prevenir

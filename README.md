@@ -62,6 +62,62 @@ antes de levar para produção.
 
 ---
 
+## Compatibilidade de cliente — a restrição mais séria
+
+O fork é construído sobre o **Vaultwarden 1.36.0**. Confirme na sua imagem:
+
+```bash
+docker exec vaultwarden /vaultwarden --version
+```
+
+Isso importa porque o upstream publicou dois marcos de compatibilidade **depois**
+dessa versão:
+
+| Versão upstream | Exigência |
+|---|---|
+| 1.37.0 | necessária para clientes Bitwarden 2026.7.0+ |
+| 1.37.2 | *"required for support with clients with version 2026.8.0+"* |
+
+A correção relevante é o [PR #7608](https://github.com/dani-garcia/vaultwarden/pull/7608),
+que adiciona um `revisionDate` que os clientes novos esperam. É o campo que o
+cliente usa para decidir se a sincronização terminou.
+
+**Sintoma quando o servidor está atrasado:** o web vault funciona normalmente,
+mas a extensão de navegador e o app de celular autenticam, criam itens, e ficam
+com a lista carregando indefinidamente. A diferença é que o web vault vem
+empacotado com o servidor e casa com a versão dele; extensão e celular
+atualizam sozinhos pelas lojas e passam à frente.
+
+Confirme comparando as versões:
+
+```bash
+docker exec vaultwarden /vaultwarden --version    # servidor e web vault
+```
+
+contra a versão da extensão em `chrome://extensions` ou `edge://extensions`.
+
+### O que fazer
+
+Antes de mexer no servidor, tente o contorno que o mantenedor do Vaultwarden
+recomenda para esses casos: **limpar o armazenamento da extensão** — não basta
+sair da conta nem desinstalar. Remova os dados do site/extensão, feche o
+navegador por completo e entre de novo.
+
+Se não resolver, as saídas são, em ordem de esforço:
+
+1. **Verificar se o fork rebaseou** para 1.37.2 ou mais novo. A tag `:testing`
+   muda sem aviso — compare o digest e a versão antes de decidir.
+2. **Construir o fork você mesmo**, aplicando o PR #7419 sobre a 1.37.2.
+3. **Abrir mão do Key Connector** e usar o upstream estável, que suporta os
+   clientes atuais — ao custo de voltar a exigir senha mestra. Ver "Modo estável
+   sem Key Connector".
+
+Essa é a manifestação concreta do risco descrito acima: um fork que depende de PR
+não mergeado fica atrás do upstream, e a defasagem aparece primeiro nos clientes
+que atualizam sozinhos.
+
+---
+
 ## O que muda no modelo de segurança
 
 Com senha mestra, a chave que decifra o cofre nunca existe no servidor. Um

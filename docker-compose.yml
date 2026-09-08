@@ -237,18 +237,13 @@ services:
     container_name: key-connector
     restart: unless-stopped
 
-    # O KC busca o JWKS em KC_IDENTITY_AUTHORITY (o proprio dominio publico)
-    # para validar tokens. Sem isto, a resolucao sairia pela interface de
-    # rede ate o IP publico da VPS e tentaria voltar por "hairpin" - muitos
-    # provedores nao suportam isso, e a busca do JWKS falha silenciosamente.
-    # host-gateway aponta para o IP do host dentro do container, resolvendo
-    # o dominio sem sair da VPS. Se o provedor JA suportar hairpin NAT, esta
-    # linha e inofensiva - so evita a viagem desnecessaria.
-    #
-    # VW_DOMAIN_HOST e so o hostname (sem https://, sem porta, sem barra) -
-    # o compose nao consegue extrair isso de VW_DOMAIN sozinho.
-    extra_hosts:
-      - "${VW_DOMAIN_HOST:?defina VW_DOMAIN_HOST com apenas o hostname, ex: vault.example.com}:host-gateway"
+    # NAO adicione extra_hosts apontando o dominio para host-gateway aqui.
+    # Parece uma boa ideia (evita hairpin NAT), mas quebra o TLS quando ha
+    # CDN na frente: o proxy reverso costuma servir um certificado de origem
+    # (Cloudflare Origin CA, por exemplo) que NAO e publicamente confiavel.
+    # O container passa a falhar em "unable to get local issuer certificate",
+    # nunca descobre o provedor de identidade e nunca abre a porta 8081.
+    # Ver README, "Quando o KC nao alcanca o provedor de identidade".
 
     depends_on:
       init-perms:

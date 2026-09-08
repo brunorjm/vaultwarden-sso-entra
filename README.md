@@ -347,25 +347,26 @@ docker run --rm -it ghcr.io/acul021/vaultwarden:testing /vaultwarden hash
 
 Cole **o hash** em `VW_ADMIN_TOKEN` e guarde a senha num cofre à parte.
 
-**Escape cada `$` do hash como `$$`.** O Dockhand grava um arquivo `.env`, e o
-Docker Compose interpola `$` nele — sem escapar, `$argon2id`, `$v` e `$m` viram
-variáveis inexistentes e o hash chega mutilado no container. O sintoma é o
-Compose avisando na saída do deploy:
+**Não adivinhe se precisa escapar o `$`.** O hash tem vários, e o tratamento
+depende de quem sobe o stack: o Dockhand passa o valor **literal**, enquanto um
+`docker compose up` rodado à mão no mesmo diretório **interpola** — o mesmo valor
+produz resultados diferentes nos dois caminhos.
 
-```
-WARN The "argon2id" variable is not set. Defaulting to a blank string.
-WARN The "v" variable is not set. Defaulting to a blank string.
-```
-
-Se esses warnings aparecerem, o token está sendo destruído. Confirme o que
-chegou de fato:
+Cole com `$` simples, faça o deploy, e verifique o que realmente chegou:
 
 ```bash
 docker exec vaultwarden printenv ADMIN_TOKEN | cut -c1-30
 ```
 
-Precisa começar com `$argon2id$v=19$m=`, com **um** cifrão. A mesma regra vale
-para qualquer senha que contenha `$` — banco e SMTP inclusive.
+| O que apareceu | O que fazer |
+|---|---|
+| `$argon2id$v=19$m=` | correto, nada a fazer |
+| `$$argon2id$$v=` | escapou sem precisar — use `$` simples |
+| `=19=65540` ou vazio | foi interpolado — use `$$` |
+
+Se o deploy imprimir `WARN The "argon2id" variable is not set`, é o terceiro
+caso. Sem esse aviso, `$` simples. A mesma verificação vale para qualquer senha
+que contenha `$` — banco e SMTP inclusive.
 
 Como Owner/Admin não usam Key Connector, esse token é o seu segundo caminho de
 emergência, independente do Entra.
@@ -670,7 +671,8 @@ O SSO com Entra ID continua funcionando normalmente no upstream — o que se per
 | Todo login recusado logo após o SSO | `SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION` desligado |
 | `AADSTS7000215: Invalid client secret` | Foi copiado o *Secret ID* em vez do *Value*, ou expirou |
 | Cliente não oferece o Key Connector | `KEY_CONNECTOR_ORG_NAME` diferente do nome real da organização; ou o usuário é Owner/Admin, que não podem se inscrever |
-| `502` em `/keyconnector/alive`, e o log do KC repete `identity provider not reachable yet` | O KC **só passa a escutar depois** de descobrir o provedor de identidade. Falhando a descoberta, ele nunca abre a porta e o nginx devolve 502. Quase sempre é o `extra_hosts` ausente ou `VW_DOMAIN_HOST` não preenchido |
+| `502` em `/keyconnector/alive`, e o log do KC repete `identity provider not reachable yet` | O KC só escuta depois de descobrir o provedor de identidade. Causa mais comum: um `extra_hosts` apontando o domínio para `host-gateway`, que faz o container pegar o certificado de origem da CDN e falhar na verificação TLS. Ver "Quando o KC não alcança o provedor de identidade" |
+| `DOMAIN` sem `https://` | Quebra o issuer dos JWT (`<DOMAIN>\|login`) e a derivação do redirect URI. Precisa ser a URL completa |
 | Login e criação funcionam, mas listar itens fica carregando pra sempre — na extensão E no celular, enquanto o web vault funciona. E F5 no web vault pede login de novo, sempre | Sessão não persiste. Falta `offline_access` concedido no App Registration do SSO, exigido por `SSO_AUTH_ONLY_NOT_SESSION=false`. Sem refresh token não há renovação. Veja "Sessão que não persiste" abaixo |
 | Login parece funcionar mas volta pro início logo depois, sem erro nos logs do Vaultwarden | KC não conseguiu buscar o JWKS. Veja o item de hairpin abaixo — é a causa mais provável quando o Vaultwarden só mostra `200 OK` em tudo |
 | KC responde 401 em `/user-keys` | Mesma causa do item acima |
@@ -709,30 +711,65 @@ Um detalhe que atrapalha o diagnóstico: no app de celular, preencher apenas a
 web, ícones). Os campos separados existem para topologias fora do padrão, e
 deixá-los vazios não é a causa deste problema.
 
-**Hairpin.** O Key Connector chama `KC_IDENTITY_AUTHORITY`, que é o próprio
-domínio público (`https://<dominio>/identity`) — sairia do container, iria até
-o IP público da VPS e voltaria pelo NPMplus. Muitos provedores não suportam essa
-volta ("hairpin NAT"), e a busca do JWKS falha de um jeito que não aparece nos
-logs do Vaultwarden: o login autentica normal, mas o navegador não consegue
-completar a inscrição no Key Connector e volta para o início sem erro visível.
+### Quando o KC não alcança o provedor de identidade
 
-O compose já vem com a correção — `extra_hosts: ["${VW_DOMAIN_HOST}:host-gateway"]`
-no serviço `key-connector` — que resolve o domínio para o próprio host dentro do
-container, sem sair da VPS. Depende de `VW_DOMAIN_HOST` estar preenchido com
-**apenas o hostname**, sem `https://` nem barra — confira se não ficou esquecido
-no `.env`, é fácil passar batido porque o compose não consegue derivá-lo
-sozinho a partir de `VW_DOMAIN`.
+O Key Connector busca o JWKS em `KC_IDENTITY_AUTHORITY` para validar tokens. Ele
+**só passa a escutar na porta 8081 depois** dessa descoberta ter sucesso — o log
+mostra `listening on 0.0.0.0:8081` sempre após `discovered identity provider`.
+Se a descoberta falha, a porta nunca abre, o proxy devolve `502` em
+`/keyconnector/alive`, e o login entra em loop.
 
-Se mesmo assim o problema persistir — provedor com rede exótica onde nem
-`host-gateway` resolve — a alternativa é abandonar o discovery e fixar a chave
-pública, exportando-a do Vaultwarden:
+**Não "resolva" isso com `extra_hosts`.** Apontar o domínio para `host-gateway`
+dentro do container parece elegante — evita a viagem até o IP público e volta
+por hairpin NAT. Mas quebra o TLS quando há CDN na frente: o proxy reverso
+normalmente serve um **certificado de origem** (Cloudflare Origin CA, por
+exemplo) que só é válido para a CDN validar, e não é publicamente confiável. O
+container passa a falhar com:
+
+```
+error sending request for url (https://<dominio>/identity/.well-known/openid-configuration)
+```
+
+e o `curl` no mesmo caminho revela a causa real:
+
+```
+curl: (60) SSL certificate problem: unable to get local issuer certificate
+```
+
+Como diagnosticar em dois comandos, na VPS — compare o emissor dos dois lados:
+
+```bash
+echo | openssl s_client -connect 172.17.0.1:443 -servername <dominio> 2>/dev/null | openssl x509 -noout -issuer
+```
+
+```bash
+echo | openssl s_client -connect <dominio>:443 -servername <dominio> 2>/dev/null | openssl x509 -noout -issuer
+```
+
+Emissores diferentes = há CDN terminando TLS, e o caminho direto vai falhar
+verificação. Nesse caso **deixe o container sair pela rota normal**, atravessando
+a CDN, que é onde o certificado é publicamente confiável. Teste assim:
+
+```bash
+docker run --rm --entrypoint curl <VW_IMAGE> -sS -o /dev/null -m 15 -w '%{remote_ip} -> %{http_code}
+' https://<dominio>/identity/.well-known/openid-configuration
+```
+
+`200` confirma que o caminho normal funciona e que nenhum ajuste de host é
+necessário.
+
+Se o seu provedor realmente não fizer hairpin NAT **e** você tiver certificado de
+origem, as duas saídas são instalar a CA de origem no trust store do container,
+ou abandonar o discovery e fixar a chave pública, exportando-a do Vaultwarden:
 
 ```bash
 openssl rsa -in /opt/vaultwarden/data/rsa_key.pem -pubout -out /opt/vaultwarden/keyconnector/identity.pub.pem
 ```
 
 Aí troque `KC_IDENTITY_AUTHORITY` por `KC_IDENTITY_PUBLIC_KEY_PATH` +
-`KC_JWT_ISSUER`. Custo: precisa reexportar se o `rsa_key.pem` mudar.
+`KC_JWT_ISSUER`. O issuer do Vaultwarden tem o formato `<DOMAIN>|login` — por
+isso `DOMAIN` precisa incluir o `https://`. Custo: reexportar se o `rsa_key.pem`
+mudar.
 
 Diagnóstico de SSO: `SSO_DEBUG_TOKENS=true` temporariamente. Ele **loga os
 tokens** — desligue em seguida e limpe os logs.

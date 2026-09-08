@@ -6,6 +6,64 @@ jeito que está — principalmente as partes que fogem do óbvio.
 
 ---
 
+## 13 — Reversao do extra_hosts: ele quebrava o TLS do Key Connector
+
+O `extra_hosts` adicionado no item 10 **causou** uma falha em vez de prevenir
+uma. Revertido.
+
+Com acesso a VPS, a cadeia ficou visivel. O container do KC resolvia o dominio
+corretamente para o host-gateway — `getent ahostsv4` devolvia `172.17.0.1`, sem
+IPv6 concorrente. Mas a conexao morria em:
+
+```
+curl: (60) SSL certificate problem: unable to get local issuer certificate
+```
+
+Comparando os certificados dos dois caminhos:
+
+| Caminho | Emissor |
+|---|---|
+| Direto no proxy (`172.17.0.1`) | CloudFlare Origin SSL Certificate Authority |
+| Publico (via CDN) | Google Trust Services |
+
+Ha Cloudflare terminando TLS na frente, e o proxy reverso serve um **certificado
+de origem** — valido apenas para a Cloudflare validar, nao publicamente
+confiavel. O `extra_hosts` fazia o container pular a CDN e bater direto no
+proxy, onde o certificado nao passa na verificacao. Sem JWKS, o KC nunca abre a
+porta 8081, o proxy devolve 502 em `/keyconnector/alive`, e o login entra em
+loop.
+
+Teste que confirmou a reversao: o mesmo container **sem** `extra_hosts` conecta
+em `104.21.38.161` (Cloudflare) e recebe `HTTP 200`.
+
+O erro de origem foi ter tratado hairpin NAT como problema presumido. O log de
+13:33 do dia anterior ja mostrava `discovered identity provider` funcionando —
+evidencia de que o caminho normal sempre esteve bom. A correcao foi aplicada
+sem que o sintoma existisse.
+
+`VW_DOMAIN_HOST`, criada so para alimentar esse `extra_hosts`, deixa de existir.
+
+O README ganhou a secao "Quando o KC nao alcanca o provedor de identidade", que
+inverte a orientacao: nao use `extra_hosts`, e se o KC nao alcancar o provedor,
+compare os emissores dos dois certificados antes de mexer em resolucao de nome.
+
+### Orientacao de escape do cifrao, revisada de novo
+
+O container recebeu `$$argon2id$$v=19$$m=` — identico ao que esta no `.env`,
+caractere por caractere. Ou seja: o Dockhand passa o valor **literal**, sem
+interpolar, e a orientacao do item 12 (escapar com `$$`) deixou o token
+invalido na direcao oposta.
+
+O que confunde: rodando `docker compose` a mao no mesmo diretorio, o Compose
+**interpola** e produz o resultado contrario. Os dois caminhos tratam o mesmo
+arquivo de formas diferentes.
+
+A documentacao parou de afirmar qual e o certo e passou a ensinar a verificar,
+com uma tabela dos tres resultados possiveis de
+`printenv ADMIN_TOKEN | cut -c1-30`.
+
+---
+
 ## 12 — Sessao que nao persiste: offline_access e SSO_AUTH_ONLY_NOT_SESSION
 
 Depois de resolver o bloco do NPMplus, apareceu um conjunto de sintomas que

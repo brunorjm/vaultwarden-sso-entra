@@ -757,10 +757,22 @@ vida dos tokens do Entra — o que exige **refresh token**, que só existe se
 `offline_access` estiver concedido em *API permissions* do App Registration do
 SSO, com *Grant admin consent* aplicado.
 
-Confira lá primeiro. Se preferir desacoplar, `VW_SSO_AUTH_ONLY_NOT_SESSION=true`
-faz o Vaultwarden gerenciar a sessão sozinho — resolve o sintoma, mas você perde
-a revogação imediata pelo Entra: desativar alguém lá deixa de derrubar a sessão
-que já está aberta aqui.
+**Não existe contorno pelo servidor.** Com Key Connector ativo, o Vaultwarden
+recusa `SSO_AUTH_ONLY_NOT_SESSION=true` explicitamente:
+
+```
+Unable to save config: Key Connector is incompatible with
+`SSO_AUTH_ONLY_NOT_SESSION=true` (the connector must validate
+Vaultwarden-issued access tokens)
+```
+
+Ou seja: com Key Connector, a sessão **obrigatoriamente** segue o ciclo de vida
+dos tokens do Entra, e o refresh token deixa de ser opcional. `offline_access`
+concedido com admin consent é requisito, não recomendação.
+
+Confira em *API permissions* do App Registration do **SSO** — não o de e-mail.
+Precisa listar, em Microsoft Graph → Delegated: `openid`, `profile`, `email` e
+`offline_access`, todos com consentimento concedido.
 
 Um detalhe que atrapalha o diagnóstico: no app de celular, preencher apenas a
 **URL do servidor** é o correto — ele deriva as demais (API, identidade, cofre

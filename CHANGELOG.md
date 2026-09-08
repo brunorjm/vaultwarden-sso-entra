@@ -58,8 +58,8 @@ chaves, nao so as editadas. Foi o que aconteceu ao configurar SMTP pelo painel.
 
 Consequencia: as correcoes feitas no `.env` depois disso nao surtiram efeito
 nenhum, e o compose virou decorativo para essas chaves. O `.env` mostrava
-`DOMAIN=vault.example.com` (sem esquema) enquanto o config.json tinha
-`https://vault.example.com` — o valor correto vinha do arquivo, nao do ambiente.
+o dominio sem o esquema `https://`, enquanto o config.json tinha a URL
+completa — o valor correto vinha do arquivo, nao do ambiente.
 
 Isso colide com a regra de configuracao so por variavel de ambiente. A saida
 exige ordem: corrigir as variaveis no Dockhand **primeiro**, so entao apagar o

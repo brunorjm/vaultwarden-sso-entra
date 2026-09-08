@@ -196,7 +196,11 @@ services:
       # ---------- Ícones e logs ----------
       - ICON_SERVICE=internal
       - ICON_CACHE_TTL=2592000
-      - LOG_LEVEL=info
+      # Para diagnosticar SSO, use:
+      #   VW_LOG_LEVEL=info,vaultwarden::sso=debug
+      # O sso_debug_tokens sozinho nao basta - as linhas sao emitidas em
+      # nivel debug, entao ficam invisiveis com LOG_LEVEL=info.
+      - LOG_LEVEL=${VW_LOG_LEVEL:-info}
       - EXTENDED_LOGGING=true
       - LOG_TIMESTAMP_FORMAT=%Y-%m-%dT%H:%M:%S%.3f%:z
 
